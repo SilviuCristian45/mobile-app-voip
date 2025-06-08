@@ -33,18 +33,17 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val REQUEST_AUDIO_PERMISSION = 123
     }
-
     private var isRecording = false
     private lateinit var recordButton: Button
     private var recordingJob: Job? = null
     private var receivingJob: Job? = null
     private val tag = "voip";
 
-    private val SERVER_IP = ""
+    private val SERVER_IP = InetAddress.getByName("192.168.216.98")
     private val SERVER_PORT = 41234
     private val BUFFER_SIZE = 2048
+    private val SAMPLE_RATE = 16000 //Hz
 
-    // În clasa ta (e.g., în ViewModel sau unde rulezi corutinele)
     private var sharedSocket: DatagramSocket? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -67,14 +66,12 @@ class MainActivity : AppCompatActivity() {
 
 
         receivingJob = CoroutineScope(Dispatchers.IO).launch {
-            val localIp = getLocalIpAddress()
-            val buffer = ByteArray(2048)
-
+            val buffer = ByteArray(BUFFER_SIZE)
             val packet = DatagramPacket(buffer, buffer.size)
 
             val audioTrack = AudioTrack(
                 AudioManager.STREAM_MUSIC,
-                16000,
+                SAMPLE_RATE,
                 AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
                 buffer.size,
@@ -84,10 +81,10 @@ class MainActivity : AppCompatActivity() {
             audioTrack.play()
 
             while (isActive) {
-                Log.d(this.tag, "receive audio job")
+                Log.d(tag, "receive audio job")
                 sharedSocket?.receive(packet)
                 val senderIp = packet.address?.hostAddress
-                Log.d(this.tag, "Primit pachet de la $senderIp cu lungimea ${packet.length}")
+                Log.d(tag, "Primit pachet de la $senderIp cu lungimea ${packet.length}")
                 audioTrack.write(packet.data, 0, packet.length)
             }
 
@@ -121,8 +118,7 @@ class MainActivity : AppCompatActivity() {
         }
         return null
     }
-
-
+    
     private fun startRecording() {
         isRecording = true
         recordButton.setBackgroundColor(Color.RED)
@@ -142,7 +138,7 @@ class MainActivity : AppCompatActivity() {
 
     @RequiresPermission(Manifest.permission.RECORD_AUDIO)
     private fun recordAndSendAudioUDP() {
-        val sampleRate = 16000
+        val sampleRate = SAMPLE_RATE
         val minBufferSize = AudioRecord.getMinBufferSize(
             sampleRate,
             AudioFormat.CHANNEL_IN_MONO,
@@ -158,17 +154,15 @@ class MainActivity : AppCompatActivity() {
         )
 
         val buffer = ByteArray(minBufferSize)
-        val address = InetAddress.getByName("192.168.216.98") // <- IP server
-        val port = 41234
 
         recorder.startRecording()
 
         while (isRecording && isActive) {
             val read = recorder.read(buffer, 0, buffer.size)
-            Log.d(this.tag, "citescaudio cu lungimea de " + buffer.size);
+            Log.d(tag, "citescaudio cu lungimea de " + buffer.size);
             if (read > 0) {
-                val packet = DatagramPacket(buffer, read, address, port)
-                Log.d(this.tag, "trimitem packet" + packet.length);
+                val packet = DatagramPacket(buffer, read, SERVER_IP, SERVER_PORT)
+                Log.d(tag, "trimitem packet" + packet.length);
                 sharedSocket?.send(packet)
             }
         }
