@@ -2,6 +2,7 @@ package com.example.android
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Context
 import android.graphics.Color
 import android.media.AudioFormat
 import android.media.AudioRecord
@@ -9,6 +10,8 @@ import android.media.MediaRecorder
 import android.nfc.Tag
 import android.media.AudioTrack
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 
 import android.os.Bundle
 import android.util.Log
@@ -36,6 +39,7 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.Socket
+import java.nio.ByteBuffer
 
 class MainActivity : AppCompatActivity() {
     companion object {
@@ -255,8 +259,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     private fun notifyServerDisconnect() {
-        val message = "DISCONNECT"
+        val message = "DISCONNECT:" + this.getNetworkType(this)
         val buffer = message.toByteArray()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -269,6 +274,21 @@ class MainActivity : AppCompatActivity() {
                 sharedSocket?.close()
                 sharedSocket = null
             }
+        }
+    }
+
+    @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
+    @SuppressLint("ServiceCast")
+    private fun getNetworkType(context: Context): String {
+        val connectivityManager = context.getSystemService(CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork ?: return "Unknown"
+        val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork) ?: return "Unknown"
+
+        return when {
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "WiFi"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> "Ethernet"
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "Mobile (4G/5G)"
+            else -> "Unknown"
         }
     }
 
@@ -298,16 +318,28 @@ class MainActivity : AppCompatActivity() {
         )
 
         val buffer = ByteArray(minBufferSize)
+        val headerSize = 16; //bytes
+
 
         recorder.startRecording()
 
+        var sequence = 0L;
         while (isRecording && isActive) {
             val read = recorder.read(buffer, 0, buffer.size)
             Log.d(tag, "citescaudio cu lungimea de " + buffer.size);
             if (read > 0) {
-                val packet = DatagramPacket(buffer, read, SERVER_IP, SERVER_PORT)
+                val timestamp = System.currentTimeMillis()
+                val packetBuffer = ByteBuffer.allocate(headerSize + read)
+                // Adaugă header
+                packetBuffer.putLong(sequence)
+                packetBuffer.putLong(timestamp)
+                // Adaugă datele audio
+                packetBuffer.put(buffer, 0, read)
+                val packetData = packetBuffer.array()
+                val packet = DatagramPacket(packetData, packetData.size, SERVER_IP, SERVER_PORT)
                 Log.d(tag, "trimitem packet" + packet.length);
                 sharedSocket?.send(packet)
+                sequence++;
             }
         }
 
