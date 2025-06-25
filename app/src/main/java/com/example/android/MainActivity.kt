@@ -56,7 +56,7 @@ class MainActivity : AppCompatActivity() {
     private var receivingJob: Job? = null
     private val tag = "voip";
 
-    private var SERVER_IP = InetAddress.getByName("192.168.216.98")
+    private var SERVER_IP = InetAddress.getByName("192.168.80.98")
     private val SERVER_PORT = 41234
     private val BUFFER_SIZE = 2048
     private val SAMPLE_RATE = 16000 //Hz
@@ -73,7 +73,7 @@ class MainActivity : AppCompatActivity() {
         serverConnectedSwitch = findViewById(R.id.isConnectedSwitch)
         connectToServerButton = findViewById(R.id.connectToServerBtn)
 
-        ipTextInput.setText("192.168.216.98")
+        ipTextInput.setText("192.168.80.98")
 
         serverConnectedSwitch.setOnCheckedChangeListener { _, isChecked ->
             if (!isChecked) {
@@ -223,7 +223,10 @@ class MainActivity : AppCompatActivity() {
                     sharedSocket?.receive(packet)
                     val senderIp = packet.address?.hostAddress
                     Log.d(tag, "Primit pachet de la $senderIp cu lungimea ${packet.length}")
-                    audioTrack.write(packet.data, 0, packet.length)
+                    val compressedAudio = packet.data.copyOf(packet.length)
+                    val decompressedData = Compressor.decode(compressedAudio)
+                    Log.d(tag, "Pachetul decomprimat are ${decompressedData.size}")
+                    audioTrack.write(decompressedData, 0, decompressedData.size)
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Eroare la receive: ${e.message}")
@@ -329,15 +332,16 @@ class MainActivity : AppCompatActivity() {
             Log.d(tag, "citescaudio cu lungimea de " + buffer.size);
             if (read > 0) {
                 val timestamp = System.currentTimeMillis()
-                val packetBuffer = ByteBuffer.allocate(headerSize + read)
+                val compressedAudioBuffer = Compressor.encode(buffer)
+                val packetBuffer = ByteBuffer.allocate(headerSize + compressedAudioBuffer.size)
                 // Adaugă header
                 packetBuffer.putLong(sequence)
                 packetBuffer.putLong(timestamp)
                 // Adaugă datele audio
-                packetBuffer.put(buffer, 0, read)
+                packetBuffer.put(compressedAudioBuffer, 0, compressedAudioBuffer.size)
                 val packetData = packetBuffer.array()
                 val packet = DatagramPacket(packetData, packetData.size, SERVER_IP, SERVER_PORT)
-                Log.d(tag, "trimitem packet" + packet.length);
+                Log.d(tag, "trimitem packet comprimat" + packetData.size);
                 sharedSocket?.send(packet)
                 sequence++;
             }
