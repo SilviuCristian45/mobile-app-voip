@@ -17,6 +17,7 @@ import android.os.Bundle
 import android.util.Log
 import android.widget.Button
 import android.widget.EditText
+import android.widget.RatingBar
 import android.widget.Switch
 import android.widget.Toast
 import androidx.activity.enableEdgeToEdge
@@ -50,6 +51,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var recordButton: Button
     private lateinit var ipTextInput: EditText
     private lateinit var serverConnectedSwitch: Switch
+    private lateinit var disconnectButton: Button
     private lateinit var connectToServerButton: Button
 
     private var recordingJob: Job? = null
@@ -61,9 +63,10 @@ class MainActivity : AppCompatActivity() {
     private val BUFFER_SIZE = 2048
     private val SAMPLE_RATE = 16000 //Hz
 
+    private var selectedRating: Int = 0
+
     private var sharedSocket: DatagramSocket? = null
 
-    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -72,14 +75,13 @@ class MainActivity : AppCompatActivity() {
         ipTextInput = findViewById(R.id.ipTextInput)
         serverConnectedSwitch = findViewById(R.id.isConnectedSwitch)
         connectToServerButton = findViewById(R.id.connectToServerBtn)
+        disconnectButton = findViewById(R.id.disconnectButton)
 
-        ipTextInput.setText("192.168.80.98")
+        ipTextInput.setText(SERVER_IP.toString())
 
-        serverConnectedSwitch.setOnCheckedChangeListener { _, isChecked ->
-            if (!isChecked) {
-                disconnectFromServer()
-                serverConnectedSwitch.isClickable = false;
-            }
+        disconnectButton.setOnClickListener {
+            disconnectFromServer()
+            serverConnectedSwitch.isChecked = false;
         }
 
         serverConnectedSwitch.isClickable = false
@@ -130,7 +132,6 @@ class MainActivity : AppCompatActivity() {
                 // Actualizează switch-ul UI în thread-ul UI
                 runOnUiThread {
                     serverConnectedSwitch.isChecked = true
-                    serverConnectedSwitch.isClickable = true
                     startReceivingJob()
                 }
 
@@ -256,15 +257,17 @@ class MainActivity : AppCompatActivity() {
     private fun disconnectFromServer() {
         stopRecording()
         stopReceivingJob()
-        notifyServerDisconnect()
-        runOnUiThread {
-            serverConnectedSwitch.isChecked = false
+        showRatingDialog {
+            notifyServerDisconnect()
+            runOnUiThread {
+                serverConnectedSwitch.isChecked = false
+            }
         }
     }
 
     @RequiresPermission(Manifest.permission.ACCESS_NETWORK_STATE)
     private fun notifyServerDisconnect() {
-        val message = "DISCONNECT:" + this.getNetworkType(this)
+        val message = "DISCONNECT:" + this.getNetworkType(this)+":"+selectedRating
         val buffer = message.toByteArray()
         CoroutineScope(Dispatchers.IO).launch {
             try {
@@ -350,4 +353,36 @@ class MainActivity : AppCompatActivity() {
         recorder.stop()
         recorder.release()
     }
+
+
+    private fun showRatingDialog(onRatingSelected: () -> Unit) {
+        val dialogView = layoutInflater.inflate(R.layout.dialog_rating, null)
+        val ratingBar = dialogView.findViewById<RatingBar>(R.id.ratingBar)
+
+        val dialog = androidx.appcompat.app.AlertDialog.Builder(this)
+            .setView(dialogView)
+            .setCancelable(false)  // utilizatorul nu poate închide cu back sau tap afară
+            .setPositiveButton("OK", null) // punem null ca să putem controla butonul manual
+            .create()
+
+        dialog.setOnShowListener {
+            val okButton = dialog.getButton(androidx.appcompat.app.AlertDialog.BUTTON_POSITIVE)
+            okButton.isEnabled = false // la început dezactivat
+
+            ratingBar.setOnRatingBarChangeListener { _, rating, _ ->
+                okButton.isEnabled = rating >= 1 // activăm butonul dacă rating >= 1
+            }
+
+            okButton.setOnClickListener {
+                selectedRating = ratingBar.rating.toInt()
+                Toast.makeText(this, "Ai ales $selectedRating stea/stele", Toast.LENGTH_SHORT).show()
+                dialog.dismiss()
+                // aici poți folosi selectedRating mai departe
+                onRatingSelected()
+            }
+        }
+
+        dialog.show()
+    }
+
 }
