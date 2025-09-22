@@ -32,6 +32,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable.isActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.net.DatagramPacket
@@ -58,7 +59,7 @@ class MainActivity : AppCompatActivity() {
     private var receivingJob: Job? = null
     private val tag = "voip";
 
-    private var SERVER_IP = InetAddress.getByName("192.168.80.98")
+    private var SERVER_IP = InetAddress.getByName("192.168.113.98")
     private val SERVER_PORT = 41234
     private val BUFFER_SIZE = 2048
     private val SAMPLE_RATE = 16000 //Hz
@@ -67,6 +68,7 @@ class MainActivity : AppCompatActivity() {
 
     private var sharedSocket: DatagramSocket? = null
 
+    @SuppressLint("ClickableViewAccessibility")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -201,33 +203,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun startReceivingJob() {
-        if (receivingJob?.isActive == true) return  // evită să-l pornești de mai multe ori
+        if (receivingJob?.isActive == true) return
 
         receivingJob = CoroutineScope(Dispatchers.IO).launch {
-            val buffer = ByteArray(BUFFER_SIZE)
-            val packet = DatagramPacket(buffer, buffer.size)
+            val packetBuffer = ByteArray(65536)
+
+            val minTrackBuf = AudioTrack.getMinBufferSize(
+                SAMPLE_RATE,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT
+            )
 
             val audioTrack = AudioTrack(
                 AudioManager.STREAM_MUSIC,
                 SAMPLE_RATE,
                 AudioFormat.CHANNEL_OUT_MONO,
                 AudioFormat.ENCODING_PCM_16BIT,
-                buffer.size,
+                minTrackBuf,
                 AudioTrack.MODE_STREAM
             )
 
             audioTrack.play()
 
             try {
+                val packet = DatagramPacket(packetBuffer, packetBuffer.size)
                 while (isActive) {
-                    Log.d(tag, "receive audio job")
                     sharedSocket?.receive(packet)
-                    val senderIp = packet.address?.hostAddress
-                    Log.d(tag, "Primit pachet de la $senderIp cu lungimea ${packet.length}")
-                    val compressedAudio = packet.data.copyOf(packet.length)
-                    val decompressedData = Compressor.decode(compressedAudio)
-                    Log.d(tag, "Pachetul decomprimat are ${decompressedData.size}")
-                    audioTrack.write(decompressedData, 0, decompressedData.size)
+                    val audioBytes = packet.data.copyOf(packet.length)
+                    val decompressedData = Compressor.decode(audioBytes) // byte[] PCM16
+
+                    // Scrie direct — nu folosi delay fix
+                    var offset = 0
+                    while (offset < decompressedData.size) {
+                        val written = audioTrack.write(decompressedData, offset, decompressedData.size - offset)
+                        if (written > 0) offset += written
+                        else break
+                    }
                 }
             } catch (e: Exception) {
                 Log.e(tag, "Eroare la receive: ${e.message}")
@@ -237,6 +248,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
     }
+
 
     private fun stopReceivingJob() {
         receivingJob?.cancel()
